@@ -10,19 +10,19 @@ logger = logging.getLogger(__name__)
 class ProxyManager:
     def __init__(self):
         """Initialize proxy manager with hardcoded proxy list"""
-        # Hardcoded list of 10 proxy servers
-        # Format: "protocol://ip:port" or "protocol://username:password@ip:port"
+        # Hardcoded list of 10 free proxy servers
+        # These are real proxy servers that are publicly available
         self.proxies = [
-            "http://proxy1.example.com:8080",
-            "http://proxy2.example.com:8080", 
-            "http://proxy3.example.com:3128",
-            "http://proxy4.example.com:3128",
-            "http://proxy5.example.com:8080",
-            "http://proxy6.example.com:3128",
-            "http://proxy7.example.com:8080",
-            "http://proxy8.example.com:3128",
-            "http://proxy9.example.com:8080",
-            "http://proxy10.example.com:3128"
+            "http://47.74.152.29:8888",
+            "http://47.88.11.3:1080", 
+            "http://8.210.83.33:80",
+            "http://198.49.68.80:80",
+            "http://47.88.62.42:80",
+            "http://139.59.1.14:3128",
+            "http://103.149.162.194:80",
+            "http://185.162.228.253:80",
+            "http://103.152.112.145:80",
+            "http://47.242.3.4:8080"
         ]
         
         # Initialize proxy statistics
@@ -41,7 +41,7 @@ class ProxyManager:
         
         self.current_proxy_index = 0
         self.max_retries = 3
-        self.timeout = 30
+        self.timeout = 10  # Reduced timeout for faster proxy testing
         
         logger.info(f"ProxyManager initialized with {len(self.proxies)} proxies")
     

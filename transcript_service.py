@@ -128,25 +128,107 @@ class TranscriptService:
             logger.error(f"Error getting transcript for {video_id} with proxy {proxy_url}: {str(e)}")
             return {'success': False, 'transcript': None, 'error': error_msg}
     
+    def get_transcript_without_proxy(self, video_id: str) -> Dict:
+        """Get transcript without using proxy (direct connection)"""
+        try:
+            # Try to get transcript in different languages (priority order)
+            languages = ['en', 'en-US', 'en-GB', 'ar']
+            transcript = None
+            
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+            
+            for lang in languages:
+                try:
+                    # Try to find manually created transcript first
+                    try:
+                        transcript = transcript_list.find_manually_created_transcript([lang])
+                        logger.info(f"Found manually created transcript in {lang}")
+                        break
+                    except NoTranscriptFound:
+                        pass
+                    
+                    # Try generated transcript
+                    try:
+                        transcript = transcript_list.find_generated_transcript([lang])
+                        logger.info(f"Found generated transcript in {lang}")
+                        break
+                    except NoTranscriptFound:
+                        continue
+                        
+                except Exception as e:
+                    logger.debug(f"Failed to get transcript in {lang}: {str(e)}")
+                    continue
+            
+            if not transcript:
+                # Try to get any available transcript
+                available_transcripts = list(transcript_list)
+                if available_transcripts:
+                    transcript = available_transcripts[0]
+                    logger.info(f"Using available transcript: {transcript.language}")
+                else:
+                    raise NoTranscriptFound("No transcripts available for this video")
+            
+            # Fetch the transcript
+            transcript_data = transcript.fetch()
+            
+            # Format transcript text
+            formatted_transcript = self.format_transcript(transcript_data)
+            
+            return {
+                'success': True,
+                'transcript': formatted_transcript,
+                'raw_transcript': transcript_data,
+                'language': transcript.language,
+                'is_generated': transcript.is_generated,
+                'error': None
+            }
+            
+        except TranscriptsDisabled:
+            error_msg = "Transcripts are disabled for this video"
+            logger.warning(f"Transcripts disabled for video {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except NoTranscriptFound:
+            error_msg = "No transcript found for this video"
+            logger.warning(f"No transcript found for video {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except VideoUnavailable:
+            error_msg = "Video is unavailable or private"
+            logger.warning(f"Video unavailable: {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except Exception as e:
+            error_msg = f"Error fetching transcript: {str(e)}"
+            logger.error(f"Error getting transcript for {video_id}: {str(e)}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+
     def get_transcript(self, video_id: str) -> Dict:
-        """Get transcript with automatic proxy rotation"""
+        """Get transcript with automatic proxy rotation and fallback to direct connection"""
         if not video_id:
             return {'success': False, 'transcript': None, 'error': 'Invalid video ID', 'proxy_used': None}
         
+        # First, try direct connection (no proxy) as it's often faster and more reliable
+        logger.info(f"Attempting to get transcript for {video_id} with direct connection")
+        result = self.get_transcript_without_proxy(video_id)
+        
+        if result['success']:
+            result['proxy_used'] = 'Direct connection (no proxy)'
+            logger.info(f"Successfully got transcript for {video_id} with direct connection")
+            return result
+        
+        logger.info(f"Direct connection failed for {video_id}, trying with proxies")
+        
         attempted_proxies = set()
         
-        # Try up to 3 different proxies
+        # Try up to 3 different proxies if direct connection fails
         for attempt in range(min(3, len(self.proxy_manager.proxies))):
             proxy_url = self.proxy_manager.get_working_proxy()
             
             if not proxy_url:
-                logger.error("No working proxies available")
-                return {
-                    'success': False,
-                    'transcript': None,
-                    'error': 'No working proxies available',
-                    'proxy_used': None
-                }
+                logger.warning("No working proxies available, using direct connection result")
+                result['proxy_used'] = 'Failed - no working proxies'
+                return result
             
             if proxy_url in attempted_proxies:
                 # Get a different proxy
@@ -160,69 +242,22 @@ class TranscriptService:
             
             logger.info(f"Attempting to get transcript for {video_id} using proxy {proxy_url}")
             
-            result = self.get_transcript_with_proxy(video_id, proxy_url)
+            proxy_result = self.get_transcript_with_proxy(video_id, proxy_url)
             
-            if result['success']:
+            if proxy_result['success']:
                 # Update proxy stats for successful transcript fetch
                 self.proxy_manager.update_proxy_stats(proxy_url, True, 1.0)
-                result['proxy_used'] = proxy_url
+                proxy_result['proxy_used'] = proxy_url
                 logger.info(f"Successfully got transcript for {video_id} using proxy {proxy_url}")
-                return result
+                return proxy_result
             else:
                 # Update proxy stats for failed transcript fetch
                 self.proxy_manager.update_proxy_stats(proxy_url, False, 0)
-                logger.warning(f"Failed to get transcript using proxy {proxy_url}: {result['error']}")
+                logger.warning(f"Failed to get transcript using proxy {proxy_url}: {proxy_result['error']}")
         
-        # If all proxies failed, try without proxy as last resort
-        logger.info(f"Trying to get transcript for {video_id} without proxy as last resort")
-        try:
-            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-            
-            # Try to get any available transcript
-            languages = ['en', 'en-US', 'en-GB']
-            transcript = None
-            
-            for lang in languages:
-                try:
-                    transcript = transcript_list.find_manually_created_transcript([lang])
-                    break
-                except NoTranscriptFound:
-                    try:
-                        transcript = transcript_list.find_generated_transcript([lang])
-                        break
-                    except NoTranscriptFound:
-                        continue
-            
-            if not transcript:
-                available_transcripts = list(transcript_list)
-                if available_transcripts:
-                    transcript = available_transcripts[0]
-                else:
-                    raise NoTranscriptFound("No transcripts available")
-            
-            transcript_data = transcript.fetch()
-            formatted_transcript = self.format_transcript(transcript_data)
-            
-            logger.info(f"Successfully got transcript for {video_id} without proxy")
-            return {
-                'success': True,
-                'transcript': formatted_transcript,
-                'raw_transcript': transcript_data,
-                'language': transcript.language,
-                'is_generated': transcript.is_generated,
-                'error': None,
-                'proxy_used': 'None (direct connection)'
-            }
-            
-        except Exception as e:
-            error_msg = f"Failed to get transcript even without proxy: {str(e)}"
-            logger.error(error_msg)
-            return {
-                'success': False,
-                'transcript': None,
-                'error': error_msg,
-                'proxy_used': None
-            }
+        # If all methods failed, return the original direct connection result
+        result['proxy_used'] = 'All methods failed'
+        return result
     
     def format_transcript(self, transcript_data: List[Dict]) -> str:
         """Format transcript data into readable text"""
