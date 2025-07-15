@@ -276,23 +276,34 @@ class TranscriptService:
             'proxy_used': 'All proxies failed'
         }
     
-    def format_transcript(self, transcript_data: List[Dict]) -> str:
+    def format_transcript(self, transcript_data) -> str:
         """Format transcript data into readable text"""
         if not transcript_data:
             return ""
         
         formatted_lines = []
-        for entry in transcript_data:
-            text = entry.get('text', '').strip()
-            start_time = entry.get('start', 0)
-            
-            # Convert seconds to MM:SS format
-            minutes = int(start_time // 60)
-            seconds = int(start_time % 60)
-            timestamp = f"[{minutes:02d}:{seconds:02d}]"
-            
-            if text:
-                formatted_lines.append(f"{timestamp} {text}")
+        
+        # Handle both list format and FetchedTranscriptSnippet objects
+        if hasattr(transcript_data, '__iter__'):
+            for entry in transcript_data:
+                # Handle FetchedTranscriptSnippet objects
+                if hasattr(entry, 'text') and hasattr(entry, 'start'):
+                    text = entry.text.strip()
+                    start_time = entry.start
+                # Handle dictionary format
+                elif isinstance(entry, dict):
+                    text = entry.get('text', '').strip()
+                    start_time = entry.get('start', 0)
+                else:
+                    continue
+                
+                # Convert seconds to MM:SS format
+                minutes = int(start_time // 60)
+                seconds = int(start_time % 60)
+                timestamp = f"[{minutes:02d}:{seconds:02d}]"
+                
+                if text:
+                    formatted_lines.append(f"{timestamp} {text}")
         
         return "\n".join(formatted_lines)
     
