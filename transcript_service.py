@@ -1,235 +1,262 @@
-import re
-import requests
-from youtube_transcript_api._api import YouTubeTranscriptApi
-from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
 import logging
+import re
+from typing import Dict, Optional, List
+from youtube_transcript_api import YouTubeTranscriptApi
+from youtube_transcript_api._errors import TranscriptsDisabled, NoTranscriptFound, VideoUnavailable
+import requests
+from proxy_manager import ProxyManager
 
-def clean_transcript_text(text):
-    """Clean transcript text by removing filler content and normalizing."""
-    if not text:
-        return ""
-    
-    # Remove common filler content
-    filler_patterns = [
-        r'\[Music\]',
-        r'\[Applause\]',
-        r'\[Laughter\]',
-        r'\[Inaudible\]',
-        r'\[Background music\]',
-        r'\[♪.*?♪\]',
-        r'\[.*?music.*?\]',
-        r'\[.*?applause.*?\]',
-        r'\[.*?laughter.*?\]',
-    ]
-    
-    cleaned_text = text
-    for pattern in filler_patterns:
-        cleaned_text = re.sub(pattern, '', cleaned_text, flags=re.IGNORECASE)
-    
-    # Clean up whitespace and normalize
-    cleaned_text = re.sub(r'\s+', ' ', cleaned_text).strip()
-    
-    return cleaned_text
+logger = logging.getLogger(__name__)
 
-def extract_video_metadata(video_id, proxy_url=None):
-    """Extract video metadata by scraping the YouTube page."""
-    try:
-        url = f"https://www.youtube.com/watch?v={video_id}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        }
+class TranscriptService:
+    def __init__(self, proxy_manager: ProxyManager):
+        """Initialize transcript service with proxy manager"""
+        self.proxy_manager = proxy_manager
         
-        # Configure proxy if provided
-        proxies = None
-        if proxy_url:
-            proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            logging.info(f"Using proxy for metadata extraction: {proxy_url}")
-        
-        response = requests.get(url, headers=headers, proxies=proxies, timeout=10)
-        response.raise_for_status()
-        html_content = response.text
-        
-        metadata = {}
-        
-        # Extract title
-        title_match = re.search(r'"title":"([^"]+)"', html_content)
-        if title_match:
-            metadata['title'] = title_match.group(1).replace('\\u0026', '&').replace('\\"', '"')
-        else:
-            # Fallback to meta tag
-            title_match = re.search(r'<meta name="title" content="([^"]+)"', html_content)
-            if title_match:
-                metadata['title'] = title_match.group(1)
-        
-        # Extract description
-        desc_match = re.search(r'"shortDescription":"([^"]+)"', html_content)
-        if desc_match:
-            metadata['description'] = desc_match.group(1).replace('\\n', '\n').replace('\\"', '"')
-        
-        # Extract channel name
-        channel_match = re.search(r'"ownerChannelName":"([^"]+)"', html_content)
-        if channel_match:
-            metadata['channel_name'] = channel_match.group(1)
-        else:
-            # Fallback
-            channel_match = re.search(r'"author":"([^"]+)"', html_content)
-            if channel_match:
-                metadata['channel_name'] = channel_match.group(1)
-        
-        # Extract duration (in seconds)
-        duration_match = re.search(r'"lengthSeconds":"(\d+)"', html_content)
-        if duration_match:
-            metadata['duration_seconds'] = int(duration_match.group(1))
-            # Convert to human readable format
-            seconds = metadata['duration_seconds']
-            hours = seconds // 3600
-            minutes = (seconds % 3600) // 60
-            seconds = seconds % 60
-            if hours > 0:
-                metadata['duration'] = f"{hours}:{minutes:02d}:{seconds:02d}"
-            else:
-                metadata['duration'] = f"{minutes}:{seconds:02d}"
-        
-        # Extract view count
-        views_match = re.search(r'"viewCount":"(\d+)"', html_content)
-        if views_match:
-            metadata['view_count'] = int(views_match.group(1))
-        
-        # Extract upload date
-        upload_match = re.search(r'"uploadDate":"([^"]+)"', html_content)
-        if upload_match:
-            metadata['upload_date'] = upload_match.group(1)
-        else:
-            # Try alternative pattern
-            upload_match = re.search(r'"publishDate":"([^"]+)"', html_content)
-            if upload_match:
-                metadata['upload_date'] = upload_match.group(1)
-        
-        return metadata
-        
-    except Exception as e:
-        logging.error(f"Error extracting metadata for video {video_id}: {str(e)}")
-        return {}
-
-def detect_language_type(language_code):
-    """Determine if language is English or non-English."""
-    english_codes = ['en', 'en-US', 'en-GB', 'en-CA', 'en-AU', 'en-IN']
-    return "en" if language_code in english_codes else "non-en"
-
-def get_transcript_and_metadata(video_id, max_duration_minutes=20, proxy_url=None):
-    """
-    Extract transcript and metadata from a YouTube video.
-    
-    Args:
-        video_id (str): YouTube video ID
-        max_duration_minutes (int): Maximum duration to extract in minutes
-        proxy_url (str, optional): Proxy URL for metadata extraction
-    
-    Returns:
-        dict: Contains video_id, language_code, language_type, full_text, captions, and video_metadata
-    """
-    try:
-        # Get available transcripts
-        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
-        
-        # Try to get English transcript first
-        transcript = None
-        language_code = None
-        
-        try:
-            # Try manual English transcript first
-            for t in transcript_list:
-                if t.language_code in ['en', 'en-US', 'en-GB', 'en-CA', 'en-AU']:
-                    if not t.is_generated:  # Prefer manual transcripts
-                        transcript = t
-                        language_code = t.language_code
-                        break
-            
-            # If no manual English transcript, try auto-generated English
-            if not transcript:
-                for t in transcript_list:
-                    if t.language_code in ['en', 'en-US', 'en-GB', 'en-CA', 'en-AU']:
-                        transcript = t
-                        language_code = t.language_code
-                        break
-            
-            # If no English transcript, get the first available transcript
-            if not transcript:
-                transcript = next(iter(transcript_list))
-                language_code = transcript.language_code
-                
-        except StopIteration:
-            raise Exception("No transcripts available for this video")
-        
-        # Fetch the transcript data
-        transcript_data = transcript.fetch()
-        
-        # Filter by max duration (convert minutes to seconds)
-        max_duration_seconds = max_duration_minutes * 60
-        filtered_transcript = [
-            entry for entry in transcript_data 
-            if (entry['start'] if isinstance(entry, dict) else entry.start) <= max_duration_seconds
+    def extract_video_id(self, url: str) -> Optional[str]:
+        """Extract video ID from YouTube URL"""
+        # Common YouTube URL patterns
+        patterns = [
+            r'(?:https?://)?(?:www\.)?youtube\.com/watch\?v=([a-zA-Z0-9_-]{11})',
+            r'(?:https?://)?(?:www\.)?youtu\.be/([a-zA-Z0-9_-]{11})',
+            r'(?:https?://)?(?:www\.)?youtube\.com/embed/([a-zA-Z0-9_-]{11})',
+            r'(?:https?://)?(?:www\.)?youtube\.com/v/([a-zA-Z0-9_-]{11})',
+            r'^([a-zA-Z0-9_-]{11})$'  # Direct video ID
         ]
         
-        # Clean and process transcript
-        captions = []
-        full_text_parts = []
-        seen_texts = set()  # To remove duplicates
+        for pattern in patterns:
+            match = re.search(pattern, url)
+            if match:
+                video_id = match.group(1)
+                logger.debug(f"Extracted video ID: {video_id}")
+                return video_id
         
-        for entry in filtered_transcript:
-            # Handle both dict and object formats
-            if isinstance(entry, dict):
-                start_time = entry['start']
-                duration = entry['duration'] 
-                text = entry['text']
+        logger.warning(f"Could not extract video ID from URL: {url}")
+        return None
+    
+    def get_transcript_with_proxy(self, video_id: str, proxy_url: str) -> Dict:
+        """Get transcript using a specific proxy"""
+        try:
+            # Set proxy for the youtube-transcript-api
+            proxies = self.proxy_manager.format_proxy_dict(proxy_url)
+            
+            # Monkey patch the requests session to use proxy
+            original_get = requests.get
+            
+            def proxied_get(*args, **kwargs):
+                kwargs['proxies'] = proxies
+                kwargs['timeout'] = kwargs.get('timeout', 30)
+                return original_get(*args, **kwargs)
+            
+            requests.get = proxied_get
+            
+            try:
+                # Try to get transcript in different languages (priority order)
+                languages = ['en', 'en-US', 'en-GB', 'auto']
+                transcript = None
+                
+                for lang in languages:
+                    try:
+                        transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                        
+                        # Try to find manually created transcript first
+                        try:
+                            transcript = transcript_list.find_manually_created_transcript([lang])
+                            logger.info(f"Found manually created transcript in {lang}")
+                            break
+                        except NoTranscriptFound:
+                            pass
+                        
+                        # Try generated transcript
+                        try:
+                            transcript = transcript_list.find_generated_transcript([lang])
+                            logger.info(f"Found generated transcript in {lang}")
+                            break
+                        except NoTranscriptFound:
+                            continue
+                            
+                    except Exception as e:
+                        logger.debug(f"Failed to get transcript in {lang}: {str(e)}")
+                        continue
+                
+                if not transcript:
+                    # Try to get any available transcript
+                    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                    available_transcripts = list(transcript_list)
+                    if available_transcripts:
+                        transcript = available_transcripts[0]
+                        logger.info(f"Using available transcript: {transcript.language}")
+                    else:
+                        raise NoTranscriptFound("No transcripts available for this video")
+                
+                # Fetch the transcript
+                transcript_data = transcript.fetch()
+                
+                # Format transcript text
+                formatted_transcript = self.format_transcript(transcript_data)
+                
+                return {
+                    'success': True,
+                    'transcript': formatted_transcript,
+                    'raw_transcript': transcript_data,
+                    'language': transcript.language,
+                    'is_generated': transcript.is_generated,
+                    'error': None
+                }
+                
+            finally:
+                # Restore original requests.get
+                requests.get = original_get
+                
+        except TranscriptsDisabled:
+            error_msg = "Transcripts are disabled for this video"
+            logger.warning(f"Transcripts disabled for video {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except NoTranscriptFound:
+            error_msg = "No transcript found for this video"
+            logger.warning(f"No transcript found for video {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except VideoUnavailable:
+            error_msg = "Video is unavailable or private"
+            logger.warning(f"Video unavailable: {video_id}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+            
+        except Exception as e:
+            error_msg = f"Error fetching transcript: {str(e)}"
+            logger.error(f"Error getting transcript for {video_id} with proxy {proxy_url}: {str(e)}")
+            return {'success': False, 'transcript': None, 'error': error_msg}
+    
+    def get_transcript(self, video_id: str) -> Dict:
+        """Get transcript with automatic proxy rotation"""
+        if not video_id:
+            return {'success': False, 'transcript': None, 'error': 'Invalid video ID', 'proxy_used': None}
+        
+        attempted_proxies = set()
+        
+        # Try up to 3 different proxies
+        for attempt in range(min(3, len(self.proxy_manager.proxies))):
+            proxy_url = self.proxy_manager.get_working_proxy()
+            
+            if not proxy_url:
+                logger.error("No working proxies available")
+                return {
+                    'success': False,
+                    'transcript': None,
+                    'error': 'No working proxies available',
+                    'proxy_used': None
+                }
+            
+            if proxy_url in attempted_proxies:
+                # Get a different proxy
+                remaining_proxies = [p for p in self.proxy_manager.proxies if p not in attempted_proxies]
+                if remaining_proxies:
+                    proxy_url = self.proxy_manager.get_random_proxy()
+                    while proxy_url in attempted_proxies and len(attempted_proxies) < len(self.proxy_manager.proxies):
+                        proxy_url = self.proxy_manager.get_random_proxy()
+            
+            attempted_proxies.add(proxy_url)
+            
+            logger.info(f"Attempting to get transcript for {video_id} using proxy {proxy_url}")
+            
+            result = self.get_transcript_with_proxy(video_id, proxy_url)
+            
+            if result['success']:
+                # Update proxy stats for successful transcript fetch
+                self.proxy_manager.update_proxy_stats(proxy_url, True, 1.0)
+                result['proxy_used'] = proxy_url
+                logger.info(f"Successfully got transcript for {video_id} using proxy {proxy_url}")
+                return result
             else:
-                start_time = entry.start
-                duration = entry.duration
-                text = entry.text
+                # Update proxy stats for failed transcript fetch
+                self.proxy_manager.update_proxy_stats(proxy_url, False, 0)
+                logger.warning(f"Failed to get transcript using proxy {proxy_url}: {result['error']}")
+        
+        # If all proxies failed, try without proxy as last resort
+        logger.info(f"Trying to get transcript for {video_id} without proxy as last resort")
+        try:
+            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
             
-            cleaned_text = clean_transcript_text(text)
+            # Try to get any available transcript
+            languages = ['en', 'en-US', 'en-GB']
+            transcript = None
             
-            if cleaned_text and cleaned_text not in seen_texts:
-                seen_texts.add(cleaned_text)
-                
-                captions.append({
-                    'start': start_time,
-                    'duration': duration,
-                    'text': cleaned_text
-                })
-                
-                full_text_parts.append(cleaned_text)
+            for lang in languages:
+                try:
+                    transcript = transcript_list.find_manually_created_transcript([lang])
+                    break
+                except NoTranscriptFound:
+                    try:
+                        transcript = transcript_list.find_generated_transcript([lang])
+                        break
+                    except NoTranscriptFound:
+                        continue
+            
+            if not transcript:
+                available_transcripts = list(transcript_list)
+                if available_transcripts:
+                    transcript = available_transcripts[0]
+                else:
+                    raise NoTranscriptFound("No transcripts available")
+            
+            transcript_data = transcript.fetch()
+            formatted_transcript = self.format_transcript(transcript_data)
+            
+            logger.info(f"Successfully got transcript for {video_id} without proxy")
+            return {
+                'success': True,
+                'transcript': formatted_transcript,
+                'raw_transcript': transcript_data,
+                'language': transcript.language,
+                'is_generated': transcript.is_generated,
+                'error': None,
+                'proxy_used': 'None (direct connection)'
+            }
+            
+        except Exception as e:
+            error_msg = f"Failed to get transcript even without proxy: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'success': False,
+                'transcript': None,
+                'error': error_msg,
+                'proxy_used': None
+            }
+    
+    def format_transcript(self, transcript_data: List[Dict]) -> str:
+        """Format transcript data into readable text"""
+        if not transcript_data:
+            return ""
         
-        # Join all text parts
-        full_text = ' '.join(full_text_parts)
+        formatted_lines = []
+        for entry in transcript_data:
+            text = entry.get('text', '').strip()
+            start_time = entry.get('start', 0)
+            
+            # Convert seconds to MM:SS format
+            minutes = int(start_time // 60)
+            seconds = int(start_time % 60)
+            timestamp = f"[{minutes:02d}:{seconds:02d}]"
+            
+            if text:
+                formatted_lines.append(f"{timestamp} {text}")
         
-        # Extract video metadata
-        video_metadata = extract_video_metadata(video_id, proxy_url)
-        
-        # Determine language type
-        language_type = detect_language_type(language_code)
-        
-        return {
-            'video_id': video_id,
-            'language_code': language_code,
-            'language_type': language_type,
-            'full_text': full_text,
-            'captions': captions,
-            'video_metadata': video_metadata,
-            'total_segments': len(captions),
-            'transcript_duration_minutes': max_duration_minutes,
-            'actual_duration_extracted': max(entry['start'] if isinstance(entry, dict) else entry.start for entry in filtered_transcript) / 60 if filtered_transcript else 0
-        }
-        
-    except VideoUnavailable:
-        raise Exception(f"Video {video_id} is unavailable (private, deleted, or doesn't exist)")
-    except TranscriptsDisabled:
-        raise Exception(f"Transcripts are disabled for video {video_id}")
-    except NoTranscriptFound:
-        raise Exception(f"No transcripts found for video {video_id}")
-    except Exception as e:
-        logging.error(f"Error in get_transcript_and_metadata: {str(e)}")
-        raise Exception(f"Failed to process video {video_id}: {str(e)}")
+        return "\n".join(formatted_lines)
+    
+    def get_video_info(self, video_id: str) -> Dict:
+        """Get basic video information"""
+        try:
+            # This is a simple implementation - could be enhanced with actual video metadata
+            return {
+                'video_id': video_id,
+                'url': f"https://www.youtube.com/watch?v={video_id}",
+                'status': 'Available for transcript extraction'
+            }
+        except Exception as e:
+            logger.error(f"Error getting video info: {str(e)}")
+            return {
+                'video_id': video_id,
+                'url': f"https://www.youtube.com/watch?v={video_id}",
+                'status': 'Unknown'
+            }

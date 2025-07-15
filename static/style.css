@@ -1,0 +1,119 @@
+/* Custom styles for YouTube Transcript API */
+
+/* Improve transcript readability */
+.transcript-container pre {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 0.9rem;
+    line-height: 1.6;
+}
+
+/* Enhance card appearance */
+.card {
+    border: none;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    transition: box-shadow 0.3s ease;
+}
+
+.card:hover {
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+/* Improve form styling */
+.input-group .btn {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+/* Status indicators */
+.badge {
+    font-size: 0.75rem;
+}
+
+/* Copy button animation */
+.btn-sm {
+    transition: all 0.3s ease;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .display-4 {
+        font-size: 2rem;
+    }
+    
+    .transcript-container pre {
+        font-size: 0.8rem;
+    }
+    
+    .input-group {
+        flex-direction: column;
+    }
+    
+    .input-group .btn {
+        border-radius: var(--bs-border-radius);
+        margin-top: 0.5rem;
+    }
+}
+
+/* Loading states */
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+/* Proxy status styling */
+.text-center h3 {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+/* Code blocks */
+pre code {
+    font-size: 0.85rem;
+}
+
+/* Table improvements */
+.table-responsive {
+    border-radius: var(--bs-border-radius);
+}
+
+/* Navigation enhancements */
+.navbar-brand {
+    font-weight: 600;
+}
+
+.navbar-brand i {
+    color: var(--bs-primary);
+}
+
+/* Footer styling */
+footer {
+    margin-top: auto;
+}
+
+/* Alert improvements */
+.alert {
+    border: none;
+    border-radius: var(--bs-border-radius);
+}
+
+/* Form validation */
+.form-control:focus {
+    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+/* Success/error states */
+.text-success {
+    color: var(--bs-success) !important;
+}
+
+.text-warning {
+    color: var(--bs-warning) !important;
+}
+
+.text-danger {
+    color: var(--bs-danger) !important;
+}
+
+.text-info {
+    color: var(--bs-info) !important;
+}

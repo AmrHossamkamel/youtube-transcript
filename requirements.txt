@@ -6,3 +6,17 @@ psycopg2-binary>=2.9.10
 requests>=2.32.4
 trafilatura>=2.0.0
 youtube-transcript-api>=1.1.0
+email_validator
+flask
+flask-sqlalchemy
+gunicorn
+psycopg2-binary
+email-validator
+flask
+flask-sqlalchemy
+gunicorn
+psycopg2-binary
+requests
+trafilatura
+werkzeug
+youtube-transcript-api
