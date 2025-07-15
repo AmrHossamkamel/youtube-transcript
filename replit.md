@@ -81,3 +81,6 @@ Preferred communication style: Simple, everyday language.
 Changelog:
 - July 02, 2025. Initial setup
 - July 02, 2025. Added proxy support for metadata extraction via METADATA_PROXY_URL environment variable
+- July 15, 2025. Enhanced proxy system with 10 hardcoded working proxy servers for YouTube transcript API
+- July 15, 2025. Configured system to use ONLY proxies - removed direct connection fallback per user requirement
+- July 15, 2025. Added comprehensive proxy rotation with all 10 proxies tested before failure
